@@ -385,35 +385,44 @@ val mediaCarouselGetter = findMethodDirect {
 }
 
 /**
- * Module names of the bottom sheets showing the menu of a post: the reels menu of posts shown like reels, the menu
- * of the reels viewer (scrolling through reels), and the simplified menu of the "≡" button of posts in the home
- * feed.
+ * Module names of the bottom sheets showing the menu of a post or reel. The download item is added to these sheets.
  */
 internal val SHEET_MENU_MODULES = listOf(
+    // The "⋯" menu of reels in the feed.
     "ClipsOrganicMediaItemViewMoreOptionsController",
-    "ClipsOrganicMoreOptionsHelper",
+    // The main menu of the reels viewer (Save, Playback, Not interested, ...).
+    "ReducedOptionsOverflowBottomSheet",
+    // The menu of a long press on a reel.
+    "ClipsLongPressOverflowBottomSheet",
+    // The menu of the user's own reels.
+    "GizmoOwnerOverflowBottomSheet",
+    // The simplified "≡" menu of posts in the home feed.
     "SimplifiedMediaOverflowBottomSheet",
+    // The "≡" menu of posts with few options, like AI-labeled posts (About this post, Report).
+    "MediaOverflowBottomSheetHelper",
 )
 
 /**
- * The class new-instanced right after a menu module name in [this]. The reels viewer menu also logs its module name
- * before building an unrelated object, so this is only the sheet builder when it is [the common one][sheetBuilder].
+ * The classes new-instanced right after each menu module name in [this]. A method may log several module names, and
+ * some log one before building an unrelated object, so only [the common one][sheetBuilder] is the sheet builder.
  */
-private fun MethodData.builderAfterModule(): ClassData? {
+private fun MethodData.buildersAfterModules(): List<ClassData> {
     val instructions = instructions
-    val moduleIndex = instructions.indexOfFirst { it.string in SHEET_MENU_MODULES }
-    if (moduleIndex < 0) return null
-    return instructions.drop(moduleIndex + 1).firstOrNull { it.opcodeEnum == Opcode.NEW_INSTANCE }?.classRef
+    return instructions.indices.filter { instructions[it].string in SHEET_MENU_MODULES }.mapNotNull { index ->
+        instructions.drop(index + 1).firstOrNull { it.opcodeEnum == Opcode.NEW_INSTANCE }?.classRef
+    }
 }
 
 /**
- * The bottom sheet builder, like in Piko's reels menu hook: the class built right after a menu module name in the
- * most methods. Some methods log a module name before building something else, so the most common one is the sheet.
+ * The bottom sheet builder, like in Piko's reels menu hook: the class built right after a menu module name most
+ * often. Some methods log a module name before building something else, so the most common one is the sheet.
  */
 private fun DexKitBridge.sheetBuilder(): ClassData =
-    SHEET_MENU_MODULES.flatMap { findMethodWithStrings(listOf(it)) }
-        .mapNotNull { it.builderAfterModule() }
+    sheetModuleMethods().flatMap { it.buildersAfterModules() }
         .groupBy { it.name }.values.maxByOrNull { it.size }!!.first()
+
+private fun DexKitBridge.sheetModuleMethods(): List<MethodData> =
+    SHEET_MENU_MODULES.flatMap { module -> findMethodWithStrings(listOf(module)) }.distinctBy { it.descriptor }
 
 /**
  * Show the bottom sheet menus of posts and reels. The home feed filters the options of its simplified menu to a few
@@ -421,9 +430,7 @@ private fun DexKitBridge.sheetBuilder(): ClassData =
  */
 val sheetMenuMethods = findMethodListDirect {
     val builder = sheetBuilder().name
-    SHEET_MENU_MODULES.flatMap { module -> findMethodWithStrings(listOf(module)) }
-        .filter { it.builderAfterModule()?.name == builder }
-        .distinctBy { it.descriptor }
+    sheetModuleMethods().filter { method -> method.buildersAfterModules().any { it.name == builder } }
 }
 
 val sheetMenuBuilderClass = findClassDirect { sheetBuilder() }

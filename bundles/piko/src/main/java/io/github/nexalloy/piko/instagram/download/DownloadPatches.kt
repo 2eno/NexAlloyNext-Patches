@@ -270,10 +270,29 @@ private fun activityIn(owner: Any): Activity? {
         if (context is Activity) return context
         context = (context as? ContextWrapper)?.baseContext
     }
-    return owner.javaClass.declaredFields.firstNotNullOfOrNull { field ->
-        field.takeIf { Activity::class.java.isAssignableFrom(it.type) && !Modifier.isStatic(it.modifiers) }
+    fragmentActivity(owner)?.let { return it }
+    // Fields holding the activity, or a fragment of it, like the helper of the "≡" menu of AI-labeled posts.
+    val fields = owner.javaClass.declaredFields.filter { !Modifier.isStatic(it.modifiers) && !it.type.isPrimitive }
+    fields.firstNotNullOfOrNull { field ->
+        field.takeIf { Activity::class.java.isAssignableFrom(it.type) }
             ?.apply { isAccessible = true }?.get(owner) as Activity?
+    }?.let { return it }
+    return fields.filter { it.type.name == FRAGMENT_CLASS }.firstNotNullOfOrNull { field ->
+        field.isAccessible = true
+        field.get(owner)?.let(::fragmentActivity)
     }
+}
+
+private const val FRAGMENT_CLASS = "androidx.fragment.app.Fragment"
+
+/**
+ * The activity of [owner] if it is a fragment, with its `getActivity()`.
+ */
+private fun fragmentActivity(owner: Any): Activity? {
+    var clazz: Class<*>? = owner.javaClass
+    while (clazz != null && clazz.name != FRAGMENT_CLASS) clazz = clazz.superclass
+    clazz ?: return null
+    return runCatching { clazz.getMethod("getActivity").invoke(owner) as? Activity }.getOrNull()
 }
 
 val DownloadMedia = patch(
